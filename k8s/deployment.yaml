@@ -25,7 +25,7 @@ spec:
               secretProviderClass: eks-alpha-aws-secrets
       containers:
         - name: app
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/eks-alpha-app:latest
+          image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
           ports:
             - containerPort: 3000
           env:

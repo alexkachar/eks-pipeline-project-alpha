@@ -12,6 +12,7 @@ on:
 env:
   AWS_REGION: eu-central-1
   EKS_CLUSTER: eks-alpha-cluster
+  ECR_REPOSITORY: eks-alpha-app
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
@@ -22,7 +23,7 @@ jobs:
   deploy:
     name: Deploy to EKS
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout code
@@ -38,23 +39,40 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Install envsubst
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER }}
 
+      - name: Render templated manifests
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          SECRETS_CSI_ROLE_ARN: ${{ secrets.SECRETS_CSI_ROLE_ARN }}
+        run: |
+          mkdir -p rendered-k8s
+          envsubst < k8s/service-account.yaml > rendered-k8s/service-account.yaml
+          envsubst < k8s/deployment.yaml > rendered-k8s/deployment.yaml
+
       - name: Apply Kubernetes manifests
         run: |
-          kubectl apply -f k8s/service-account.yaml
+          kubectl apply -f rendered-k8s/service-account.yaml
           kubectl apply -f k8s/secret-provider-class.yaml
-          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f rendered-k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/ingress.yaml
           kubectl apply -f k8s/hpa.yaml
 
       - name: Update deployment image
+        env:
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
         run: |
           kubectl set image deployment/eks-alpha-app \
-            app=${{ steps.login-ecr.outputs.registry }}/eks-alpha-app:${{ github.event.workflow_run.head_sha }}
+            app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}
 
       - name: Wait for rollout
         run: |
