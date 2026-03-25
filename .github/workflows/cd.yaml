@@ -13,6 +13,10 @@ env:
   AWS_REGION: eu-central-1
   EKS_CLUSTER: eks-alpha-cluster
   ECR_REPOSITORY: eks-alpha-app
+  DOMAIN_NAME: alexanderkachar.com
+  TLS_SECRET_NAME: alexanderkachar-com-tls
+  APP_SECRET_ID: eks-alpha/app-secret
+  LETSENCRYPT_EMAIL: admin@alexanderkachar.com
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
@@ -53,10 +57,15 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
           SECRETS_CSI_ROLE_ARN: ${{ secrets.SECRETS_CSI_ROLE_ARN }}
+          DOMAIN_NAME: ${{ env.DOMAIN_NAME }}
+          TLS_SECRET_NAME: ${{ env.TLS_SECRET_NAME }}
+          LETSENCRYPT_EMAIL: ${{ env.LETSENCRYPT_EMAIL }}
         run: |
           mkdir -p rendered-k8s
           envsubst < k8s/service-account.yaml > rendered-k8s/service-account.yaml
           envsubst < k8s/deployment.yaml > rendered-k8s/deployment.yaml
+          envsubst < k8s/cluster-issuer.yaml > rendered-k8s/cluster-issuer.yaml
+          envsubst < k8s/ingress.yaml > rendered-k8s/ingress.yaml
 
       - name: Apply Kubernetes manifests
         run: |
@@ -64,7 +73,8 @@ jobs:
           kubectl apply -f k8s/secret-provider-class.yaml
           kubectl apply -f rendered-k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
-          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f rendered-k8s/cluster-issuer.yaml
+          kubectl apply -f rendered-k8s/ingress.yaml
           kubectl apply -f k8s/hpa.yaml
 
       - name: Update deployment image
@@ -82,3 +92,62 @@ jobs:
         run: |
           kubectl get pods
           kubectl get ingress
+
+      - name: Wait for ingress hostname
+        run: |
+          for i in {1..40}; do
+            INGRESS_HOSTNAME="$(kubectl get ingress eks-alpha-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            if [ -n "$INGRESS_HOSTNAME" ]; then
+              echo "Ingress hostname: $INGRESS_HOSTNAME"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Ingress hostname was not assigned in time"
+          kubectl describe ingress eks-alpha-app
+          exit 1
+
+      - name: Wait for Route 53 record
+        run: |
+          for i in {1..40}; do
+            if getent ahosts "${DOMAIN_NAME}" >/dev/null 2>&1; then
+              echo "DNS record is now resolving for ${DOMAIN_NAME}"
+              getent ahosts "${DOMAIN_NAME}"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Route 53 record for ${DOMAIN_NAME} did not resolve in time"
+          exit 1
+
+      - name: Wait for cert-manager certificate
+        run: |
+          for i in {1..20}; do
+            if kubectl get certificate "${TLS_SECRET_NAME}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 15
+          done
+          kubectl wait --for=condition=Ready "certificate/${TLS_SECRET_NAME}" --timeout=20m
+          kubectl get certificate "${TLS_SECRET_NAME}" -o wide
+
+      - name: Verify app over HTTP and HTTPS
+        env:
+          APP_SECRET_VALUE: ${{ secrets.APP_SECRET_VALUE }}
+        run: |
+          EXPECTED_SECRET="$APP_SECRET_VALUE"
+          if [ -z "$EXPECTED_SECRET" ]; then
+            EXPECTED_SECRET="$(aws secretsmanager get-secret-value --secret-id "${APP_SECRET_ID}" --query SecretString --output text)"
+          fi
+
+          curl -fsSL "http://${DOMAIN_NAME}" -o app-http.html
+          curl -fsSL "https://${DOMAIN_NAME}" -o app-https.html
+
+          grep -F "Hello World!" app-http.html
+          grep -F "Hello World!" app-https.html
+          grep -F "$EXPECTED_SECRET" app-https.html
+
+      - name: Verify TLS secret and issuer
+        run: |
+          kubectl get secret "${TLS_SECRET_NAME}"
+          test "$(kubectl get certificate "${TLS_SECRET_NAME}" -o jsonpath='{.spec.issuerRef.name}')" = "letsencrypt-prod"

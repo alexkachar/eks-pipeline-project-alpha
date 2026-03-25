@@ -5,17 +5,17 @@ metadata:
   namespace: default
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    external-dns.alpha.kubernetes.io/hostname: ${DOMAIN_NAME}
+    external-dns.alpha.kubernetes.io/hostname: alexanderkachar.com
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - ${DOMAIN_NAME}
-      secretName: ${TLS_SECRET_NAME}
+        - alexanderkachar.com
+      secretName: alexanderkachar-com-tls
   rules:
-    - host: ${DOMAIN_NAME}
+    - host: alexanderkachar.com
       http:
         paths:
           - path: /

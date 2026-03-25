@@ -25,6 +25,10 @@ resource "helm_release" "nginx_ingress" {
       value = "internet-facing"
     },
     {
+      name  = "controller.service.annotations.external-dns\\.alpha\\.kubernetes\\.io/hostname"
+      value = var.domain_name
+    },
+    {
       name  = "controller.service.externalTrafficPolicy"
       value = "Local"
     }
@@ -101,4 +105,65 @@ resource "helm_release" "cert_manager" {
   ]
 
   depends_on = [module.eks]
+}
+
+resource "helm_release" "external_dns" {
+  name       = "external-dns"
+  repository = "https://kubernetes-sigs.github.io/external-dns/"
+  chart      = "external-dns"
+  version    = "1.20.0"
+  namespace  = "kube-system"
+
+  atomic          = true
+  cleanup_on_fail = true
+  wait            = true
+  timeout         = 600
+
+  set = [
+    {
+      name  = "provider.name"
+      value = "aws"
+    },
+    {
+      name  = "policy"
+      value = "sync"
+    },
+    {
+      name  = "registry"
+      value = "txt"
+    },
+    {
+      name  = "txtOwnerId"
+      value = local.cluster_name
+    },
+    {
+      name  = "sources[0]"
+      value = "service"
+    },
+    {
+      name  = "sources[1]"
+      value = "ingress"
+    },
+    {
+      name  = "domainFilters[0]"
+      value = var.domain_name
+    },
+    {
+      name  = "serviceAccount.create"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "external-dns"
+    },
+    {
+      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+      value = module.external_dns_irsa.iam_role_arn
+    }
+  ]
+
+  depends_on = [
+    module.eks,
+    module.external_dns_irsa,
+  ]
 }

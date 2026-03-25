@@ -34,9 +34,9 @@ variable "app_secret_value" {
 }
 
 variable "domain_name" {
-  description = "Optional domain name for future Route 53 / ingress work"
+  description = "Public domain name served by the ingress"
   type        = string
-  default     = null
+  default     = "alexanderkachar.com"
 }
 
 variable "github_username" {
