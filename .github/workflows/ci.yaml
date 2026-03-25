@@ -31,9 +31,9 @@ jobs:
         run: docker build -t eks-alpha-app:${{ github.sha }} .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@master
         with:
-          image-ref: eks-alpha-app:${{ github.sha }}
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.tag }}
           format: table
           exit-code: 0
           severity: CRITICAL,HIGH
