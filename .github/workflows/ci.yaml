@@ -31,7 +31,7 @@ jobs:
         run: docker build -t eks-alpha-app:${{ github.sha }} .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0  # v0.29.0
+        uses: aquasecurity/trivy-action@v0.29.0
         with:
           image-ref: eks-alpha-app:${{ github.sha }}
           format: table
